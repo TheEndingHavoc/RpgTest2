@@ -205,7 +205,7 @@ end
 
 -- Precise teleport function
 local function teleportToTarget(target)
-    if not currentHRP or not currentHRP.Parent then return end
+    if not currentHRP or not currentHRP.Parent then return false end
     
     local targetPos = target.HumanoidRootPart.Position
     currentHRP.CFrame = CFrame.new(targetPos)
@@ -213,6 +213,7 @@ local function teleportToTarget(target)
     currentHRP.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
     
     RunService.Heartbeat:Wait()
+    return true
 end
 
 -- Main farming function
@@ -341,20 +342,21 @@ local function raidLoop()
         if mob then
             currentRaidTarget = mob
             
-            local lastTeleport = 0
             while isAutoRaidEnabled and mob.Parent and mob:FindFirstChildOfClass("Humanoid") and mob.Humanoid.Health > 0 do
-                local now = tick()
-                
-                if now - lastTeleport >= 0.5 then
-                    if not teleportToTarget(mob) then
-                        break
-                    end
-                    setNoClip(true)
-                    lastTeleport = now
+                if not teleportToTarget(mob) then
+                    break
                 end
+                setNoClip(true)
                 
-                autoClick()
-                keySpam()
+                -- Perform auto click
+                simulateMouseClick()
+                
+                -- Perform auto skills
+                for _, key in ipairs(keySequence) do
+                    if selectedKeys[key] then
+                        simulateKeyPress(key)
+                    end
+                end
                 
                 task.wait(0.1)
             end
