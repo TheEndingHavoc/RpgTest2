@@ -450,9 +450,9 @@ local function setupAutoExecute(enabled)
         if state == Enum.TeleportState.Started then
             local success, err = pcall(function()
                 if syn and syn.queue_on_teleport then
-                    syn.queue_on_teleport('loadstring(game:HttpGet("https://raw.githubusercontent.com/your-repo/RPGSimulator/main/script.lua"))()')
+                    syn.queue_on_teleport('loadstring(game:HttpGet("https://raw.githubusercontent.com/TheEndingHavoc/RpgTest2/refs/heads/main/RpgSimTest.txt"))()')
                 elseif queue_on_teleport then
-                    queue_on_teleport('loadstring(game:HttpGet("https://raw.githubusercontent.com/your-repo/RPGSimulator/main/script.lua"))()')
+                    queue_on_teleport('loadstring(game:HttpGet("https://raw.githubusercontent.com/TheEndingHavoc/RpgTest2/refs/heads/main/RpgSimTest.txt"))()')
                 else
                     Fluent:Notify({
                         Title = "Auto Execute Error",
