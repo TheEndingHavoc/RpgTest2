@@ -1,0 +1,668 @@
+-- Load Fluent and Addons
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+
+-- Services
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
+local Workspace = game:GetService("Workspace")
+
+-- Player setup
+local player = Players.LocalPlayer
+local currentHRP = nil -- Will track current HumanoidRootPart
+
+-- Create the window
+local Window = Fluent:CreateWindow({
+    Title = "RPG Simulator Pro",
+    SubTitle = "Respawn-Proof Auto Farm",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 460),
+    Acrylic = true,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.LeftControl
+})
+
+-- Tabs
+local Tabs = {
+    AutoSkills = Window:AddTab({ Title = "Auto Skills", Icon = "sword" }),
+    AutoFarm = Window:AddTab({ Title = "Auto Farm", Icon = "zap" }),
+    AutoRaid = Window:AddTab({ Title = "Auto Raid", Icon = "shield" }),
+    Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
+}
+
+local Options = Fluent.Options
+
+-- Shared variables
+local isAutoSkillsEnabled = false
+local selectedKeys = {Q = true, E = true, R = true}
+local keySequence = {"Q", "E", "R"}
+local currentKeyIndex = 1
+
+-- Auto Click variables
+local isAutoClickEnabled = false
+local clickDelay = 0.1
+
+-- Auto Farm variables
+local isAutoFarmEnabled = false
+local useSkillsWhileFarming = true
+local farmDelay = 0.5
+local currentTarget = nil
+local mobTypes = {}
+local selectedMobType = nil
+local farmingThread = nil
+
+-- Auto Raid variables
+local raidOptions = {
+    "Pirate Captain", "Obsidian Lair", "Deep Water Den", "Shadow Palace", 
+    "Sun Warrior Temple F2", "Laboratory 1", "Crystal Caverns", "Rogue Hideout", 
+    "Nest of the Colossal", "Tartarus", "Doctor V's Labyrinth", "Hive", 
+    "Realm of Shadows", "The Rune King", "Mines", "Frost Dragon", 
+    "Dungeon Endless", "Emperor of Time", "Frost Dragon's Rematch"
+}
+local selectedRaid = nil
+local isHardcoreRaid = false
+local isAutoRaidEnabled = false
+local raidThread = nil
+local currentRaidTarget = nil
+
+-- Auto Execute variables
+local isAutoExecuteEnabled = false
+
+-- Permanent noclip function
+local function setNoClip(enabled)
+    if not currentHRP or not currentHRP.Parent then return end
+    for _, part in ipairs(currentHRP.Parent:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = not enabled
+        end
+    end
+end
+
+-- Character management
+local function trackCharacter(newCharacter)
+    -- Wait for HumanoidRootPart to exist
+    local hrp = newCharacter:WaitForChild("HumanoidRootPart")
+    currentHRP = hrp
+    
+    -- Set up death detection
+    local humanoid = newCharacter:WaitForChild("Humanoid")
+    humanoid.Died:Connect(function()
+        if isAutoFarmEnabled then
+            player.CharacterAdded:Wait()
+            task.wait(3)
+            if isAutoFarmEnabled then
+                startFarming()
+            end
+        end
+        if isAutoRaidEnabled then
+            player.CharacterAdded:Wait()
+            task.wait(3)
+            if isAutoRaidEnabled then
+                startRaid()
+            end
+        end
+    end)
+    
+    if isAutoFarmEnabled then
+        setNoClip(true)
+        startFarming()
+    end
+    if isAutoRaidEnabled then
+        setNoClip(true)
+        startRaid()
+    end
+end
+
+if player.Character then
+    trackCharacter(player.Character)
+end
+player.CharacterAdded:Connect(trackCharacter)
+
+-- Mob detection function
+local function getMobTypes()
+    local mobsFolder = workspace:FindFirstChild("Mobs")
+    if not mobsFolder then return {} end
+    
+    local types = {}
+    for _, mob in ipairs(mobsFolder:GetChildren()) do
+        if mob:FindFirstChild("HumanoidRootPart") and mob:FindFirstChildOfClass("Humanoid") and mob.Humanoid.Health > 0 then
+            if not table.find(types, mob.Name) then
+                table.insert(types, mob.Name)
+            end
+        end
+    end
+    return types
+end
+
+-- Key press simulation
+local function simulateKeyPress(key)
+    local keyCodes = {
+        Q = Enum.KeyCode.Q,
+        E = Enum.KeyCode.E,
+        R = Enum.KeyCode.R
+    }
+    
+    if keyCodes[key] then
+        VirtualInputManager:SendKeyEvent(true, keyCodes[key], false, game)
+        task.wait(0.05)
+        VirtualInputManager:SendKeyEvent(false, keyCodes[key], false, game)
+    end
+end
+
+-- Mouse click simulation
+local function simulateMouseClick()
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+    task.wait(0.05)
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+end
+
+-- Find mob of selected type
+local function findMob()
+    if not currentHRP or not currentHRP.Parent then return nil end
+    if not selectedMobType then return nil end
+    
+    local mobsFolder = workspace:FindFirstChild("Mobs")
+    if not mobsFolder then return nil end
+    
+    if currentTarget and currentTarget.Parent and currentTarget:FindFirstChild("Humanoid") and currentTarget.Humanoid.Health > 0 then
+        return currentTarget
+    end
+    
+    local closestMob = nil
+    local closestDistance = math.huge
+    
+    for _, mob in ipairs(mobsFolder:GetChildren()) do
+        if mob.Name == selectedMobType and mob:FindFirstChild("HumanoidRootPart") and mob:FindFirstChildOfClass("Humanoid") and mob.Humanoid.Health > 0 then
+            local distance = (mob.HumanoidRootPart.Position - currentHRP.Position).Magnitude
+            if distance < closestDistance then
+                closestMob = mob
+                closestDistance = distance
+            end
+        end
+    end
+    
+    return closestMob
+end
+
+-- Precise teleport function
+local function teleportToTarget(target)
+    if not currentHRP or not currentHRP.Parent then return end
+    
+    local targetPos = target.HumanoidRootPart.Position
+    currentHRP.CFrame = CFrame.new(targetPos)
+    currentHRP.Velocity = Vector3.new(0, 0, 0)
+    currentHRP.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    
+    RunService.Heartbeat:Wait()
+end
+
+-- Main farming function
+local function farmLoop()
+    while isAutoFarmEnabled do
+        while not currentHRP or not currentHRP.Parent do
+            task.wait(1)
+        end
+        
+        local mob = findMob()
+        if mob then
+            currentTarget = mob
+            teleportToTarget(mob)
+            setNoClip(true)
+            simulateMouseClick()
+            if useSkillsWhileFarming then
+                for _, key in ipairs(keySequence) do
+                    if selectedKeys[key] then
+                        simulateKeyPress(key)
+                    end
+                end
+            end
+        end
+        
+        task.wait(farmDelay)
+    end
+end
+
+-- Start/stop farming functions
+local function startFarming()
+    if farmingThread then
+        coroutine.close(farmingThread)
+    end
+    
+    isAutoFarmEnabled = true
+    setNoClip(true)
+    farmingThread = coroutine.create(farmLoop)
+    coroutine.resume(farmingThread)
+    
+    Fluent:Notify({
+        Title = "Auto Farm",
+        Content = "Enabled! Will survive respawns automatically.",
+        Duration = 3
+    })
+end
+
+local function stopFarming()
+    isAutoFarmEnabled = false
+    if farmingThread then
+        coroutine.close(farmingThread)
+        farmingThread = nil
+    end
+    setNoClip(false)
+    currentTarget = nil
+end
+
+-- Auto Raid functions
+local function getNil(name, class)
+    for _, v in pairs(getnilinstances()) do
+        if v.ClassName == class and v.Name == name then return v end
+    end
+end
+
+local function teleportToRaid()
+    if not selectedRaid then return end
+    
+    local args = {
+        [1] = "Raid",
+        [2] = selectedRaid,
+        [3] = isHardcoreRaid
+    }
+    
+    local raidEvent = getNil("raidEvent", "RemoteEvent") or 
+                     game:GetService("ReplicatedStorage"):FindFirstChild("raidEvent") or
+                     game:GetService("ReplicatedStorage").Events:FindFirstChild("raidEvent")
+    
+    if raidEvent then
+        raidEvent:FireServer(unpack(args))
+        Fluent:Notify({
+            Title = "Raid Teleport",
+            Content = "Teleporting to "..selectedRaid..(isHardcoreRaid and " (Hardcore)" or ""),
+            Duration = 3
+        })
+    end
+end
+
+local function activateAllClickDetectors()
+    for _, detector in ipairs(workspace:GetDescendants()) do
+        if detector:IsA("ClickDetector") then
+            fireclickdetector(detector)
+        end
+    end
+end
+
+local function findClosestRaidMob()
+    if not currentHRP or not currentHRP.Parent then return nil end
+    
+    local closestMob = nil
+    local closestDistance = math.huge
+    
+    local mobsFolder = workspace:FindFirstChild("Mobs")
+    if mobsFolder then
+        for _, mob in ipairs(mobsFolder:GetChildren()) do
+            if mob:FindFirstChild("HumanoidRootPart") and mob:FindFirstChildOfClass("Humanoid") and mob.Humanoid.Health > 0 then
+                local distance = (mob.HumanoidRootPart.Position - currentHRP.Position).Magnitude
+                if distance < closestDistance then
+                    closestMob = mob
+                    closestDistance = distance
+                end
+            end
+        end
+    end
+    
+    return closestMob
+end
+
+local function raidLoop()
+    while isAutoRaidEnabled do
+        while not currentHRP or not currentHRP.Parent do
+            task.wait(0.5)
+        end
+        
+        activateAllClickDetectors()
+        
+        local mob = findClosestRaidMob()
+        if mob then
+            currentRaidTarget = mob
+            
+            local lastTeleport = 0
+            while isAutoRaidEnabled and mob.Parent and mob:FindFirstChildOfClass("Humanoid") and mob.Humanoid.Health > 0 do
+                local now = tick()
+                
+                if now - lastTeleport >= 0.5 then
+                    if not teleportToTarget(mob) then
+                        break
+                    end
+                    setNoClip(true)
+                    lastTeleport = now
+                end
+                
+                autoClick()
+                keySpam()
+                
+                task.wait(0.1)
+            end
+            
+            task.wait(0.5)
+        else
+            task.wait(1)
+        end
+    end
+end
+
+local function startRaid()
+    if raidThread then
+        coroutine.close(raidThread)
+    end
+    
+    isAutoRaidEnabled = true
+    setNoClip(true)
+    raidThread = coroutine.create(raidLoop)
+    coroutine.resume(raidThread)
+    
+    Fluent:Notify({
+        Title = "Auto Raid",
+        Content = "Enabled! Will survive respawns automatically.",
+        Duration = 3
+    })
+end
+
+local function stopRaid()
+    isAutoRaidEnabled = false
+    if raidThread then
+        coroutine.close(raidThread)
+        raidThread = nil
+    end
+    setNoClip(false)
+    currentRaidTarget = nil
+end
+
+-- Auto Skills function
+local function keySpam()
+    local currentKey = keySequence[currentKeyIndex]
+    if selectedKeys[currentKey] then
+        simulateKeyPress(currentKey)
+    end
+    
+    currentKeyIndex = currentKeyIndex % #keySequence + 1
+    task.wait(0.1)
+end
+
+-- Auto Click function
+local function autoClick()
+    simulateMouseClick()
+    task.wait(clickDelay)
+end
+
+-- Connections
+local keyConnection, clickConnection
+
+local function toggleKeySpam(enabled)
+    isAutoSkillsEnabled = enabled
+    if enabled then
+        keyConnection = RunService.Heartbeat:Connect(keySpam)
+    elseif keyConnection then
+        keyConnection:Disconnect()
+        keyConnection = nil
+    end
+end
+
+local function toggleAutoClick(enabled)
+    isAutoClickEnabled = enabled
+    if enabled then
+        clickConnection = RunService.Heartbeat:Connect(autoClick)
+    elseif clickConnection then
+        clickConnection:Disconnect()
+        clickConnection = nil
+    end
+    Fluent:Notify({
+        Title = "Auto Click",
+        Content = enabled and "Enabled (Press F)" or "Disabled",
+        Duration = 3
+    })
+end
+
+local function toggleAutoFarm(enabled)
+    if enabled then
+        startFarming()
+    else
+        stopFarming()
+    end
+end
+
+local function toggleAutoRaid(enabled)
+    if enabled then
+        startRaid()
+    else
+        stopRaid()
+    end
+end
+
+-- Auto Execute on Teleport Logic
+local function setupAutoExecute(enabled)
+    isAutoExecuteEnabled = enabled
+    if not enabled then return end
+
+    -- Detect teleport and queue script
+    local connection
+    connection = player.OnTeleport:Connect(function(state)
+        if state == Enum.TeleportState.Started then
+            local success, err = pcall(function()
+                if syn and syn.queue_on_teleport then
+                    syn.queue_on_teleport('loadstring(game:HttpGet("https://raw.githubusercontent.com/your-repo/RPGSimulator/main/script.lua"))()')
+                elseif queue_on_teleport then
+                    queue_on_teleport('loadstring(game:HttpGet("https://raw.githubusercontent.com/your-repo/RPGSimulator/main/script.lua"))()')
+                else
+                    Fluent:Notify({
+                        Title = "Auto Execute Error",
+                        Content = "Your executor does not support queue_on_teleport!",
+                        Duration = 5
+                    })
+                    return
+                end
+            end)
+
+            if success then
+                Fluent:Notify({
+                    Title = "Auto Execute",
+                    Content = "Script will auto-execute on the next server!",
+                    Duration = 3
+                })
+            else
+                Fluent:Notify({
+                    Title = "Auto Execute Error",
+                    Content = "Failed to queue script: " .. tostring(err),
+                    Duration = 5
+                })
+            end
+
+            -- Disconnect after teleport to avoid multiple connections
+            connection:Disconnect()
+        end
+    end)
+end
+
+-- UI Elements
+-- Auto Skills Tab
+Tabs.AutoSkills:AddToggle("AutoSkillsToggle", {
+    Title = "Auto Skills",
+    Description = "Spams Q, E, R in sequence",
+    Default = false,
+    Callback = toggleKeySpam
+})
+
+Tabs.AutoSkills:AddDropdown("KeyFilter", {
+    Title = "Active Skills",
+    Values = {"Q", "E", "R"},
+    Multi = true,
+    Default = {"Q", "E", "R"},
+    Callback = function(values)
+        selectedKeys = {Q = false, E = false, R = false}
+        for value, state in pairs(values) do
+            if state then
+                selectedKeys[value] = true
+            end
+        end
+    end
+})
+
+Tabs.AutoSkills:AddToggle("AutoClickToggle", {
+    Title = "Auto Click",
+    Description = "Toggle with F key",
+    Default = false,
+    Callback = toggleAutoClick
+})
+
+Tabs.AutoSkills:AddSlider("ClickSpeedSlider", {
+    Title = "Click Speed",
+    Description = "Adjust auto click speed",
+    Default = 0.1,
+    Min = 0.05,
+    Max = 1,
+    Rounding = 2,
+    Callback = function(value)
+        clickDelay = value
+    end
+})
+
+-- Auto Farm Tab
+task.spawn(function()
+    repeat
+        mobTypes = getMobTypes()
+        task.wait(1)
+    until #mobTypes > 0
+
+    Tabs.AutoFarm:AddDropdown("MobTypeDropdown", {
+        Title = "Mob Type",
+        Description = "Select which mobs to farm",
+        Values = mobTypes,
+        Multi = false,
+        Default = nil,
+        Callback = function(value)
+            selectedMobType = value
+            currentTarget = nil
+        end
+    })
+
+    RunService.Heartbeat:Connect(function()
+        local newMobTypes = getMobTypes()
+        if #newMobTypes > 0 and #newMobTypes ~= #mobTypes then
+            mobTypes = newMobTypes
+            Options.MobTypeDropdown:SetValues(newMobTypes)
+        end
+    end)
+end)
+
+Tabs.AutoFarm:AddToggle("AutoFarmToggle", {
+    Title = "Enable Auto Farm",
+    Description = "Survives respawns with perfect positioning",
+    Default = false,
+    Callback = toggleAutoFarm
+})
+
+Tabs.AutoFarm:AddToggle("UseSkills", {
+    Title = "Use Skills While Farming",
+    Default = true,
+    Callback = function(value)
+        useSkillsWhileFarming = value
+    end
+})
+
+Tabs.AutoFarm:AddSlider("FarmDelay", {
+    Title = "Action Delay",
+    Description = "Delay between farming actions",
+    Default = 0.5,
+    Min = 0.1,
+    Max = 2,
+    Rounding = 1,
+    Callback = function(value)
+        farmDelay = value
+    end
+})
+
+-- Auto Raid Tab
+Tabs.AutoRaid:AddDropdown("RaidSelection", {
+    Title = "Raid Selection",
+    Description = "Choose which raid to join",
+    Values = raidOptions,
+    Multi = false,
+    Default = nil,
+    Callback = function(value)
+        selectedRaid = value
+    end
+})
+
+Tabs.AutoRaid:AddToggle("HardcoreToggle", {
+    Title = "Hardcore Mode",
+    Default = false,
+    Callback = function(value)
+        isHardcoreRaid = value
+    end
+})
+
+Tabs.AutoRaid:AddButton({
+    Title = "Teleport to Raid",
+    Description = "Join the selected raid",
+    Callback = teleportToRaid
+})
+
+Tabs.AutoRaid:AddToggle("AutoRaidToggle", {
+    Title = "Auto Raid",
+    Description = "Teleports every 0.5s & uses skills",
+    Default = false,
+    Callback = toggleAutoRaid
+})
+
+-- Settings Tab
+Tabs.Settings:AddToggle("AutoExecuteToggle", {
+    Title = "Auto Execute on Teleport",
+    Description = "Re-runs the script on the next server",
+    Default = false,
+    Callback = function(value)
+        setupAutoExecute(value)
+        if value then
+            Fluent:Notify({
+                Title = "Auto Execute",
+                Content = "Enabled! Script will re-run after teleporting.",
+                Duration = 3
+            })
+        else
+            Fluent:Notify({
+                Title = "Auto Execute",
+                Content = "Disabled.",
+                Duration = 3
+            })
+        end
+    end
+})
+
+-- SaveManager Configuration Section
+SaveManager:SetLibrary(Fluent)
+InterfaceManager:SetLibrary(Fluent)
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({})
+InterfaceManager:SetFolder("RPGSimulator")
+SaveManager:SetFolder("RPGSimulator/configs")
+InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+SaveManager:BuildConfigSection(Tabs.Settings)
+
+-- Hotkey
+UserInputService.InputBegan:Connect(function(input, processed)
+    if not processed and input.KeyCode == Enum.KeyCode.F then
+        toggleAutoClick(not isAutoClickEnabled)
+    end
+end)
+
+-- Initial notification
+Fluent:Notify({
+    Title = "RPG Simulator Pro",
+    Content = "Script loaded with Fluent UI!",
+    Duration = 5
+})
+
+-- Select first tab
+Window:SelectTab(1)
+
+-- Load auto-load config
+SaveManager:LoadAutoloadConfig()
