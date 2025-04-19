@@ -461,7 +461,7 @@ local function executeMainScript()
     return true
 end
 
--- Use the script content directly (excluding the auto-execute GUI and toggle)
+-- Use the script content directly (excluding the auto-execute logic to avoid nesting issues)
 local autoExecuteScript = [[
     -- Load Fluent and Addons
     local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
@@ -1037,6 +1037,23 @@ local autoExecuteScript = [[
     })
 
     -- Auto Execute Logic for Settings Tab
+    local function executeMainScript()
+        Fluent:Notify({
+            Title = "Auto Execute",
+            Content = "Main script executed on teleport!",
+            Duration = 5
+        })
+        
+        if not player:FindFirstChild("ScriptExecuted") then
+            local tag = Instance.new("BoolValue")
+            tag.Name = "ScriptExecuted"
+            tag.Value = true
+            tag.Parent = player
+        end
+        
+        return true
+    end
+
     local function setupAutoExecute()
         if not autoExecuteGui:FindFirstChild("AutoExecuteEnabled") then
             local flag = Instance.new("BoolValue")
@@ -1049,6 +1066,13 @@ local autoExecuteScript = [[
             syn.queue_on_teleport(autoExecuteScript)
         elseif queue_on_teleport then
             queue_on_teleport(autoExecuteScript)
+        else
+            Fluent:Notify({
+                Title = "Auto Execute Error",
+                Content = "Your executor does not support queue_on_teleport!",
+                Duration = 5
+            })
+            return false
         end
         
         Fluent:Notify({
@@ -1139,3 +1163,114 @@ local autoExecuteScript = [[
 
     -- Load auto-load config
     SaveManager:LoadAutoloadConfig()
+]]
+
+local function setupAutoExecute()
+    if not autoExecuteGui:FindFirstChild("AutoExecuteEnabled") then
+        local flag = Instance.new("BoolValue")
+        flag.Name = "AutoExecuteEnabled"
+        flag.Value = true
+        flag.Parent = autoExecuteGui
+    end
+    
+    if syn and syn.queue_on_teleport then
+        syn.queue_on_teleport(autoExecuteScript)
+    elseif queue_on_teleport then
+        queue_on_teleport(autoExecuteScript)
+    else
+        Fluent:Notify({
+            Title = "Auto Execute Error",
+            Content = "Your executor does not support queue_on_teleport!",
+            Duration = 5
+        })
+        return false
+    end
+    
+    Fluent:Notify({
+        Title = "Auto Execute",
+        Content = "Enabled! Script will auto-execute on the next server.",
+        Duration = 3
+    })
+    return executeMainScript()
+end
+
+local function checkAutoExecute()
+    if autoExecuteGui:FindFirstChild("AutoExecuteEnabled") and autoExecuteGui.AutoExecuteEnabled.Value then
+        local success = executeMainScript()
+        if success then
+            Fluent:Notify({
+                Title = "Auto Execute",
+                Content = "Script auto-executed successfully!",
+                Duration = 3
+            })
+        else
+            Fluent:Notify({
+                Title = "Auto Execute",
+                Content = "Failed to auto-execute script.",
+                Duration = 3
+            })
+        end
+    end
+end
+
+-- Settings Tab
+Tabs.Settings:AddToggle("AutoExecuteToggle", {
+    Title = "Auto Execute on Teleport",
+    Description = "Re-runs the script on the next server",
+    Default = false,
+    Callback = function(value)
+        isAutoExecuteEnabled = value
+        if value then
+            setupAutoExecute()
+        else
+            if autoExecuteGui:FindFirstChild("AutoExecuteEnabled") then
+                autoExecuteGui.AutoExecuteEnabled.Value = false
+            end
+            Fluent:Notify({
+                Title = "Auto Execute",
+                Content = "Disabled.",
+                Duration = 3
+            })
+        end
+    end
+})
+
+-- SaveManager Configuration Section
+SaveManager:SetLibrary(Fluent)
+InterfaceManager:SetLibrary(Fluent)
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({})
+InterfaceManager:SetFolder("RPGSimulator")
+SaveManager:SetFolder("RPGSimulator/configs")
+InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+SaveManager:BuildConfigSection(Tabs.Settings)
+
+-- Teleport detection for auto-execute
+player.OnTeleport:Connect(function(state)
+    if state == Enum.TeleportState.Started and isAutoExecuteEnabled then
+        setupAutoExecute()
+    end
+end)
+
+-- Check for auto-execute on script load
+checkAutoExecute()
+
+-- Hotkey
+UserInputService.InputBegan:Connect(function(input, processed)
+    if not processed and input.KeyCode == Enum.KeyCode.F then
+        toggleAutoClick(not isAutoClickEnabled)
+    end
+end)
+
+-- Initial notification
+Fluent:Notify({
+    Title = "RPG Simulator Pro",
+    Content = "Script loaded with Fluent UI!",
+    Duration = 5
+})
+
+-- Select first tab
+Window:SelectTab(1)
+
+-- Load auto-load config
+SaveManager:LoadAutoloadConfig()
