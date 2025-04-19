@@ -41,8 +41,8 @@ Window.Parent = CoreGui
 -- Tabs
 local Tabs = {
     AutoSkills = Window:AddTab({ Title = "Auto Skills", Icon = "sword" }),
-    AutoFarm = Window:AddTab({ Title = "Auto Farm", Icon = "zap" }),
-    AutoRaid = Window:AddTab({ Title = "Auto Raid", Icon = "shield" }),
+    AutoFarm = Window:AddTab({ Title = "Auto Farm", Icon = "anchor" }),
+    AutoRaid = Window:AddTab({ Title = "Auto Raid", Icon = "skull" }),
     Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
 }
 
