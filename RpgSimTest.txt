@@ -16,7 +16,7 @@ local player = Players.LocalPlayer
 local currentHRP = nil -- Will track current HumanoidRootPart
 
 -- GitHub URL for the script (replace with your actual GitHub URL)
-local SCRIPT_URL = "https://github.com/your-username/your-repo/raw/main/RPGSimulatorFluent.lua"
+local SCRIPT_URL = "https://raw.githubusercontent.com/TheEndingHavoc/RpgTest2/refs/heads/main/RpgSimTest.txt"
 
 -- Check for existing GUI and destroy it
 if CoreGui:FindFirstChild("RPGSimulatorProWindow") then
